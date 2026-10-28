@@ -44,7 +44,6 @@ public class AnalyticsService {
      * Every status value is always present in the result (count = 0 when none exist).
      */
     public List<StatusCountDto> getCountByStatus() {
-        // Build a lookup from the DB aggregation result
         Map<EmployeeStatus, Long> dbCounts = employeeRepository.countGroupByStatus()
                 .stream()
                 .collect(Collectors.toMap(
@@ -61,11 +60,26 @@ public class AnalyticsService {
     }
 
     /**
-     * Returns employee counts per department, sorted alphabetically by name.
-     * Employees not assigned to any department are not included.
+     * Returns employee counts per department, alphabetically ordered.
+     * Uses LEFT JOIN so departments with zero employees are included.
      */
     public List<DepartmentCountDto> getCountByDepartment() {
-        return employeeRepository.countGroupByDepartment()
+        return departmentRepository.countEmployeesPerDepartment()
+                .stream()
+                .map(row -> DepartmentCountDto.builder()
+                        .departmentName((String) row[0])
+                        .count((Long) row[1])
+                        .build())
+                .toList();
+    }
+
+    /**
+     * Returns employee counts per department sorted by headcount descending.
+     * Departments with equal headcount are sorted alphabetically.
+     * Used for "which departments have the most employees?" queries.
+     */
+    public List<DepartmentCountDto> getCountByDepartmentDesc() {
+        return departmentRepository.countEmployeesPerDepartmentByHeadcountDesc()
                 .stream()
                 .map(row -> DepartmentCountDto.builder()
                         .departmentName((String) row[0])

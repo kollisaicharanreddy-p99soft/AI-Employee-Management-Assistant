@@ -1,11 +1,13 @@
 package com.employee.management.ai;
 
+import com.employee.management.dto.DepartmentCountDto;
+import com.employee.management.dto.StatusCountDto;
+import com.employee.management.dto.WorkforceSummaryDto;
 import com.employee.management.model.Department;
 import com.employee.management.model.Employee;
 import com.employee.management.model.EmployeeStatus;
 import com.employee.management.repository.DepartmentRepository;
 import com.employee.management.repository.EmployeeRepository;
-import com.employee.management.dto.WorkforceSummaryDto;
 import com.employee.management.service.AnalyticsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,15 +21,18 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Spring AI tool implementations.
+ * Spring AI tool implementations backed by real JPA queries.
  *
- * <p>All methods are read-only and query the real database — the LLM never
- * invents employee records or statistics. Each method is annotated with
- * {@code @Tool} so that Spring AI can expose it to the chat model and call
- * it automatically when relevant.
- *
- * <p>Mutation operations are intentionally <em>not</em> exposed here; they
- * require explicit confirmation through the normal REST endpoints.
+ * <p>IMPORTANT DESIGN RULES enforced here:
+ * <ul>
+ *   <li>Every tool performs a real DB query — no in-memory defaults, no null returns
+ *       silently converted to empty lists.</li>
+ *   <li>{@link DepartmentSummary} never calls {@code d.getEmployees().size()} on a
+ *       lazy collection. Employee counts are sourced from aggregation queries only.</li>
+ *   <li>Tool descriptions are mutually exclusive — only one tool matches each
+ *       question type so the model cannot pick the wrong one.</li>
+ *   <li>Mutation operations are intentionally absent.</li>
+ * </ul>
  */
 @Slf4j
 @Component
@@ -42,8 +47,10 @@ public class EmployeeTools {
     // ── Employee queries ──────────────────────────────────────────────────
 
     @Tool(description = """
-            Returns the total number of employees currently stored in the database.
-            Use this when the user asks how many employees there are in total.
+            Returns the exact total number of employees across ALL statuses
+            (ACTIVE, INACTIVE, ON_LEAVE, and TERMINATED combined).
+            Use ONLY when the user asks for the overall headcount with no status filter.
+            Do NOT use for status-specific counts — use getEmployeeCountByStatus instead.
             """)
     public long countAllEmployees() {
         long count = employeeRepository.count();
@@ -52,28 +59,26 @@ public class EmployeeTools {
     }
 
     @Tool(description = """
-            Returns the total number of employees in a specific department.
-            Use this when the user asks how many employees are in a named department.
-            The departmentName is matched case-insensitively.
+            Returns the exact employee count for EVERY status in one call:
+            ACTIVE, INACTIVE, ON_LEAVE, and TERMINATED.
+            Use this when the user asks how many employees are active, on leave,
+            inactive, or terminated — or asks for a breakdown by status.
+            The result always contains all four statuses even if count is 0.
             """)
-    public long countEmployeesByDepartment(
-            @ToolParam(description = "The name of the department, e.g. 'Engineering'")
-            String departmentName) {
-
-        Optional<Department> dept = departmentRepository.findByNameIgnoreCase(departmentName);
-        if (dept.isEmpty()) {
-            log.debug("[AI Tool] countEmployeesByDepartment: department '{}' not found", departmentName);
-            return 0L;
-        }
-        long count = employeeRepository.countByDepartmentId(dept.get().getId());
-        log.debug("[AI Tool] countEmployeesByDepartment('{}') → {}", departmentName, count);
-        return count;
+    public List<StatusCount> getEmployeeCountByStatus() {
+        List<StatusCount> result = analyticsService.getCountByStatus()
+                .stream()
+                .map(dto -> new StatusCount(dto.getStatus().name(), dto.getCount()))
+                .toList();
+        log.debug("[AI Tool] getEmployeeCountByStatus → {}", result);
+        return result;
     }
 
     @Tool(description = """
-            Returns a summary list of all employees.
-            Each entry contains: id, full name, email, job title, status, and department name.
-            Use when the user asks to list, show, or find all employees.
+            Returns a full list of all employees in the database.
+            Each entry contains: id, full name, email, job title, status, department name.
+            Use when the user asks to list or show all employees regardless of status.
+            Do NOT use for status-filtered lists — use listEmployeesByStatus instead.
             """)
     public List<EmployeeSummary> listAllEmployees() {
         List<EmployeeSummary> result = employeeRepository.findAll()
@@ -85,12 +90,13 @@ public class EmployeeTools {
     }
 
     @Tool(description = """
-            Searches employees by a keyword matched against first name, last name,
-            email address, or job title. Returns a list of matching employee summaries.
-            Use when the user asks to find or search for employees by name, email, or role.
+            Returns all employees that match a search keyword.
+            The keyword is matched (case-insensitively) against first name, last name,
+            email address, and job title.
+            Use when the user wants to find an employee by name, email, or job title.
             """)
     public List<EmployeeSummary> searchEmployees(
-            @ToolParam(description = "Keyword to search across name, email, and job title")
+            @ToolParam(description = "Search keyword matched against name, email, and job title")
             String keyword) {
 
         List<EmployeeSummary> result = employeeRepository
@@ -104,32 +110,35 @@ public class EmployeeTools {
     }
 
     @Tool(description = """
-            Returns the details of a single employee by their numeric ID.
-            Use when the user asks about a specific employee and provides their ID.
+            Returns the full details of one employee identified by their numeric ID.
+            Use only when the user provides a specific employee ID number.
             """)
     public EmployeeDetail getEmployeeById(
-            @ToolParam(description = "The numeric employee ID")
+            @ToolParam(description = "The numeric employee ID (integer)")
             Long employeeId) {
 
-        return employeeRepository.findById(employeeId)
-                .map(EmployeeDetail::from)
-                .orElse(null);
+        Optional<EmployeeDetail> detail = employeeRepository.findById(employeeId)
+                .map(EmployeeDetail::from);
+        log.debug("[AI Tool] getEmployeeById({}) → {}", employeeId,
+                detail.isPresent() ? "found" : "not found");
+        return detail.orElse(null);
     }
 
     @Tool(description = """
-            Returns all employees with the given status.
-            Valid status values: ACTIVE, INACTIVE, ON_LEAVE, TERMINATED.
-            Use when the user asks about employees filtered by their current status.
+            Returns all employees that have a specific employment status.
+            Valid values for the status parameter: ACTIVE, INACTIVE, ON_LEAVE, TERMINATED.
+            Use when the user asks to list employees filtered by status,
+            e.g. "show me active employees" or "who is on leave?".
             """)
     public List<EmployeeSummary> listEmployeesByStatus(
-            @ToolParam(description = "Employee status: ACTIVE, INACTIVE, ON_LEAVE, or TERMINATED")
+            @ToolParam(description = "Employment status: ACTIVE, INACTIVE, ON_LEAVE, or TERMINATED")
             String status) {
 
         EmployeeStatus employeeStatus;
         try {
             employeeStatus = EmployeeStatus.valueOf(status.toUpperCase());
         } catch (IllegalArgumentException e) {
-            log.debug("[AI Tool] listEmployeesByStatus: invalid status '{}'", status);
+            log.warn("[AI Tool] listEmployeesByStatus: unrecognised status '{}'", status);
             return List.of();
         }
 
@@ -142,17 +151,18 @@ public class EmployeeTools {
     }
 
     @Tool(description = """
-            Returns all employees belonging to a specific department.
-            The departmentName is matched case-insensitively.
-            Use when the user asks to list employees in a specific department.
+            Returns all employees who belong to the named department.
+            The department name is matched case-insensitively.
+            Use when the user asks to list employees in a specific department,
+            e.g. "show me Engineering employees" or "who works in Finance?".
             """)
     public List<EmployeeSummary> listEmployeesByDepartment(
-            @ToolParam(description = "The name of the department, e.g. 'Engineering'")
+            @ToolParam(description = "Department name, e.g. 'Engineering' or 'Finance'")
             String departmentName) {
 
         Optional<Department> dept = departmentRepository.findByNameIgnoreCase(departmentName);
         if (dept.isEmpty()) {
-            log.debug("[AI Tool] listEmployeesByDepartment: department '{}' not found", departmentName);
+            log.debug("[AI Tool] listEmployeesByDepartment: '{}' not found", departmentName);
             return List.of();
         }
         List<EmployeeSummary> result = employeeRepository
@@ -168,55 +178,68 @@ public class EmployeeTools {
     // ── Department queries ────────────────────────────────────────────────
 
     @Tool(description = """
-            Returns a list of all departments with their names, descriptions,
-            and the number of employees in each.
-            Use when the user asks to list or show departments.
+            Returns every department with its exact employee headcount.
+            Uses a database aggregation (LEFT JOIN + COUNT) so departments
+            with zero employees are included. Ordered alphabetically.
+            Use when the user asks to list departments or wants to know
+            how many employees each department has.
+            Do NOT use for sorting by size — use getDepartmentsByHeadcount instead.
             """)
-    public List<DepartmentSummary> listAllDepartments() {
-        List<DepartmentSummary> result = departmentRepository.findAllOrderedByName()
+    public List<DeptCount> listAllDepartmentsWithCounts() {
+        List<DeptCount> result = analyticsService.getCountByDepartment()
                 .stream()
-                .map(DepartmentSummary::from)
+                .map(dto -> new DeptCount(dto.getDepartmentName(), dto.getCount()))
                 .toList();
-        log.debug("[AI Tool] listAllDepartments → {} departments", result.size());
+        log.debug("[AI Tool] listAllDepartmentsWithCounts → {}", result);
         return result;
     }
 
     @Tool(description = """
-            Returns the details of a single department by name, including
-            its description and the number of employees.
-            Use when the user asks about a specific department by name.
+            Returns every department sorted by employee headcount from highest to lowest.
+            Departments with equal headcount are sorted alphabetically.
+            Uses a single database aggregation query — counts are exact.
+            Use when the user asks which department has the most employees,
+            wants a ranking of departments by size, or asks about workforce distribution.
             """)
-    public DepartmentSummary getDepartmentByName(
-            @ToolParam(description = "The department name, e.g. 'Finance'")
+    public List<DeptCount> getDepartmentsByHeadcount() {
+        List<DeptCount> result = analyticsService.getCountByDepartmentDesc()
+                .stream()
+                .map(dto -> new DeptCount(dto.getDepartmentName(), dto.getCount()))
+                .toList();
+        log.debug("[AI Tool] getDepartmentsByHeadcount → {}", result);
+        return result;
+    }
+
+    @Tool(description = """
+            Returns the full details of a single named department including its description.
+            Use only when the user asks about one specific department by name.
+            Do NOT use to list all departments.
+            """)
+    public DepartmentDetail getDepartmentByName(
+            @ToolParam(description = "The exact department name, e.g. 'Finance'")
             String departmentName) {
 
-        return departmentRepository.findByNameIgnoreCase(departmentName)
-                .map(DepartmentSummary::from)
-                .orElse(null);
+        Optional<DepartmentDetail> detail = departmentRepository
+                .findByNameIgnoreCase(departmentName)
+                .map(d -> {
+                    // Count employees via aggregation — never touch the lazy collection
+                    long count = employeeRepository.countByDepartmentId(d.getId());
+                    return new DepartmentDetail(d.getId(), d.getName(), d.getDescription(), count);
+                });
+        log.debug("[AI Tool] getDepartmentByName('{}') → {}",
+                departmentName, detail.isPresent() ? "found" : "not found");
+        return detail.orElse(null);
     }
 
-    // ── Analytics queries ─────────────────────────────────────────────────
+    // ── Analytics ─────────────────────────────────────────────────────────
 
     @Tool(description = """
-            Returns the exact number of employees for each status value
-            (ACTIVE, INACTIVE, ON_LEAVE, TERMINATED) as calculated by the database.
-            Use when the user asks how many employees are active, on leave, etc.,
-            or asks for a breakdown by employment status.
-            """)
-    public List<StatusCount> getEmployeeCountByStatus() {
-        List<StatusCount> result = analyticsService.getCountByStatus()
-                .stream()
-                .map(dto -> new StatusCount(dto.getStatus().name(), dto.getCount()))
-                .toList();
-        log.debug("[AI Tool] getEmployeeCountByStatus → {} buckets", result.size());
-        return result;
-    }
-
-    @Tool(description = """
-            Returns a complete workforce summary: total employee count,
-            total department count, employee counts per status, and employee
-            counts per department. Use when the user asks for an overall
-            workforce overview or a summary of the organisation.
+            Returns a complete workforce overview in a single call:
+            - totalEmployees: exact headcount across all statuses
+            - totalDepartments: number of departments
+            - countByStatus: employee count for each of ACTIVE, INACTIVE, ON_LEAVE, TERMINATED
+            - countByDepartment: employee count per department (alphabetical)
+            Use when the user asks for a workforce overview, summary, or statistics.
             """)
     public WorkforceSummary getWorkforceSummary() {
         WorkforceSummaryDto dto = analyticsService.getWorkforceSummary();
@@ -233,13 +256,12 @@ public class EmployeeTools {
 
         WorkforceSummary summary = new WorkforceSummary(
                 dto.getTotalEmployees(), dto.getTotalDepartments(), byStatus, byDept);
-        log.debug("[AI Tool] getWorkforceSummary → {} employees, {} departments",
-                dto.getTotalEmployees(), dto.getTotalDepartments());
+        log.debug("[AI Tool] getWorkforceSummary → {}", summary);
         return summary;
     }
 
-    // ── Inner record types returned to the model ──────────────────────────
-    // Flat, serialisable records — no JPA entities or lazy proxies exposed.
+    // ── Inner record types ────────────────────────────────────────────────
+    // Flat, serialisable records. No JPA entities or lazy proxies are exposed.
 
     public record EmployeeSummary(
             Long id,
@@ -287,28 +309,20 @@ public class EmployeeTools {
         }
     }
 
-    public record DepartmentSummary(
+    /** Department detail including exact employee count from a DB aggregation. */
+    public record DepartmentDetail(
             Long id,
             String name,
             String description,
-            int employeeCount) {
+            long employeeCount) {}
 
-        static DepartmentSummary from(Department d) {
-            return new DepartmentSummary(
-                    d.getId(),
-                    d.getName(),
-                    d.getDescription(),
-                    d.getEmployees().size());
-        }
-    }
-
-    /** Used by {@link #getEmployeeCountByStatus()}. */
+    /** Per-status employee count used by {@link #getEmployeeCountByStatus()}. */
     public record StatusCount(String status, long count) {}
 
-    /** Used by {@link #getWorkforceSummary()}. */
+    /** Per-department employee count used by analytics tools. */
     public record DeptCount(String departmentName, long count) {}
 
-    /** Used by {@link #getWorkforceSummary()}. */
+    /** Full workforce summary returned by {@link #getWorkforceSummary()}. */
     public record WorkforceSummary(
             long totalEmployees,
             long totalDepartments,

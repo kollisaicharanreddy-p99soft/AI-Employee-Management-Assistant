@@ -94,21 +94,30 @@ class EmployeeToolsTest {
     @Test
     @DisplayName("countEmployeesByDepartment returns correct count for known department")
     void countEmployeesByDepartment_known() {
-        assertThat(employeeTools.countEmployeesByDepartment("Engineering")).isEqualTo(2);
-        assertThat(employeeTools.countEmployeesByDepartment("Finance")).isEqualTo(1);
+        EmployeeTools.DepartmentDetail eng = employeeTools.getDepartmentByName("Engineering");
+        EmployeeTools.DepartmentDetail fin = employeeTools.getDepartmentByName("Finance");
+        assertThat(eng).isNotNull();
+        assertThat(eng.employeeCount()).isEqualTo(2);
+        assertThat(fin).isNotNull();
+        assertThat(fin.employeeCount()).isEqualTo(1);
     }
 
     @Test
     @DisplayName("countEmployeesByDepartment is case-insensitive")
     void countEmployeesByDepartment_caseInsensitive() {
-        assertThat(employeeTools.countEmployeesByDepartment("ENGINEERING")).isEqualTo(2);
-        assertThat(employeeTools.countEmployeesByDepartment("engineering")).isEqualTo(2);
+        EmployeeTools.DepartmentDetail engUpper = employeeTools.getDepartmentByName("ENGINEERING");
+        EmployeeTools.DepartmentDetail engLower = employeeTools.getDepartmentByName("engineering");
+        assertThat(engUpper).isNotNull();
+        assertThat(engUpper.employeeCount()).isEqualTo(2);
+        assertThat(engLower).isNotNull();
+        assertThat(engLower.employeeCount()).isEqualTo(2);
     }
 
     @Test
-    @DisplayName("countEmployeesByDepartment returns 0 for unknown department")
+    @DisplayName("countEmployeesByDepartment returns null/0 for unknown department")
     void countEmployeesByDepartment_unknown() {
-        assertThat(employeeTools.countEmployeesByDepartment("Marketing")).isZero();
+        EmployeeTools.DepartmentDetail unknown = employeeTools.getDepartmentByName("Marketing");
+        assertThat(unknown).isNull();
     }
 
     // ── listAllEmployees ──────────────────────────────────────────────────
@@ -218,18 +227,18 @@ class EmployeeToolsTest {
         assertThat(employeeTools.listEmployeesByDepartment("Marketing")).isEmpty();
     }
 
-    // ── listAllDepartments ────────────────────────────────────────────────
+    // ── listAllDepartmentsWithCounts ─────────────────────────────────────
 
     @Test
-    @DisplayName("listAllDepartments returns all departments with employee count")
-    void listAllDepartments() {
-        List<EmployeeTools.DepartmentSummary> depts = employeeTools.listAllDepartments();
+    @DisplayName("listAllDepartmentsWithCounts returns all departments with employee count")
+    void listAllDepartmentsWithCounts() {
+        List<EmployeeTools.DeptCount> depts = employeeTools.listAllDepartmentsWithCounts();
         assertThat(depts).hasSize(2);
         // ordered by name: Engineering first, Finance second
-        assertThat(depts.get(0).name()).isEqualTo("Engineering");
-        assertThat(depts.get(0).employeeCount()).isEqualTo(2);
-        assertThat(depts.get(1).name()).isEqualTo("Finance");
-        assertThat(depts.get(1).employeeCount()).isEqualTo(1);
+        assertThat(depts.get(0).departmentName()).isEqualTo("Engineering");
+        assertThat(depts.get(0).count()).isEqualTo(2);
+        assertThat(depts.get(1).departmentName()).isEqualTo("Finance");
+        assertThat(depts.get(1).count()).isEqualTo(1);
     }
 
     // ── getDepartmentByName ───────────────────────────────────────────────
@@ -237,7 +246,7 @@ class EmployeeToolsTest {
     @Test
     @DisplayName("getDepartmentByName returns department for known name")
     void getDepartmentByName_known() {
-        EmployeeTools.DepartmentSummary dept = employeeTools.getDepartmentByName("Finance");
+        EmployeeTools.DepartmentDetail dept = employeeTools.getDepartmentByName("Finance");
         assertThat(dept).isNotNull();
         assertThat(dept.name()).isEqualTo("Finance");
         assertThat(dept.description()).isEqualTo("Finance");

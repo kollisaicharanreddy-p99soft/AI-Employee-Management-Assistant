@@ -10,66 +10,90 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Service;
 
 /**
- * Orchestrates the AI chat interaction.
+ * Orchestrates AI chat requests.
  *
- * <p>A new {@link ChatClient} is built per request so each conversation starts
- * with a clean context. The {@link EmployeeTools} bean is registered as a
- * tool provider, giving the model read-only access to live database data.
+ * <p>A single {@link ChatClient} is built at construction time.
+ * All {@link EmployeeTools} {@code @Tool}-annotated methods are registered as
+ * default tools so the model can call any of them on every request.
  *
- * <p>No LLM key or network call is made unless a real {@code ChatModel}
- * implementation is on the classpath and {@code SPRING_AI_OPENAI_API_KEY}
- * is set.
+ * <h3>Hallucination prevention</h3>
+ * The system prompt forbids the model from producing any numbers, names, or
+ * statistics that were not returned by a tool call. This is enforced at the
+ * prompt level; the model-independent safeguard is that every tool returns
+ * structured Java records — the model's only job is to restate them in prose.
  */
 @Slf4j
 @Service
 public class AiChatService {
 
+    /**
+     * System prompt designed to be effective on small local models (llama3.2 3B,
+     * mistral 7B) as well as larger ones. Key properties:
+     * <ul>
+     *   <li>Explicit FORBIDDEN list stops placeholder generation.</li>
+     *   <li>Mandatory tool-before-answer rule prevents hallucination.</li>
+     *   <li>Simple prose instruction avoids meta-commentary on the tools.</li>
+     * </ul>
+     */
     private static final String SYSTEM_PROMPT = """
-            You are an HR assistant for the Employee Management System.
-            You help users answer questions about employees and departments.
+            You are an HR data assistant. Your only job is to answer questions
+            about employees and departments using the tools provided to you.
 
-            IMPORTANT RULES:
-            - ALWAYS use the provided tools to fetch data from the database.
-              Never invent, estimate, or guess employee names, counts, salaries,
-              or any other factual information.
+            MANDATORY RULES — follow every rule on every response:
+            1. You MUST call a tool before answering any question about employees
+               or departments. Never answer from memory or training data.
+            2. Use the exact numbers and names returned by the tool. Do not change,
+               round, estimate, or paraphrase any count or name.
+            3. If a tool returns an empty list, say "No records found." Do not
+               invent records to fill the gap.
+            4. If a tool returns a count of 0 for a status or department, report
+               exactly 0. Do not omit it or claim it is unknown.
+
+            FORBIDDEN — never include any of the following in a response:
+            - Placeholder text such as [Insert count here], [Employee Count Here],
+              [Department Name], or any text inside square brackets.
+            - Example JSON, sample data, or illustrative records.
+            - Instructions, tool descriptions, or explanations of how tools work.
+            - Counts or names you have not received from a tool result this turn.
+            - Phrases like "based on typical data" or "usually there are".
+
+            SCOPE:
             - Only answer questions about employees and departments.
-              Politely decline unrelated topics.
-            - For mutation requests (create, update, delete), explain that those
-              operations require using the dedicated REST API endpoints and cannot
-              be performed through this chat.
-            - When you cannot find a matching employee or department via the tools,
-              say so clearly rather than making something up.
-            - Present data in a clear, concise, human-readable format.
+            - For any other topic, reply: "I can only answer questions about
+              employees and departments."
+            - For create/update/delete requests, reply: "Data changes must be made
+              through the REST API. I only read data."
             """;
 
-    private final ChatClient.Builder chatClientBuilder;
-    private final EmployeeTools employeeTools;
+    private final ChatClient chatClient;
 
     public AiChatService(ChatModel chatModel, EmployeeTools employeeTools) {
-        this.chatClientBuilder = ChatClient.builder(chatModel)
+        this.chatClient = ChatClient.builder(chatModel)
                 .defaultSystem(SYSTEM_PROMPT)
-                .defaultTools(employeeTools);   // registers all @Tool methods on EmployeeTools
-        this.employeeTools = employeeTools;
+                .defaultTools(employeeTools)
+                .build();
     }
 
     /**
-     * Sends the user's question to the LLM, allowing it to call
-     * {@link EmployeeTools} methods as needed, and returns the final answer.
+     * Sends the user's question to the LLM. The model will invoke one or more
+     * tools from {@link EmployeeTools} and then compose a prose answer from the
+     * returned data. The raw tool results are logged at DEBUG level.
      *
-     * @param request the user's question and optional conversation ID
-     * @return the AI-generated answer backed by real database data
+     * @param request validated chat request
+     * @return AI-generated answer backed exclusively by tool results
      * @throws AiServiceException if the underlying model call fails
      */
     public ChatResponse chat(ChatRequest request) {
         log.debug("AI chat request: '{}'", request.getQuestion());
         try {
-            String answer = chatClientBuilder.build()
+            String answer = chatClient
                     .prompt()
                     .user(request.getQuestion())
                     .call()
                     .content();
 
-            log.debug("AI chat response length: {} chars", answer != null ? answer.length() : 0);
+            log.debug("AI chat response length: {} chars",
+                    answer != null ? answer.length() : 0);
 
             return ChatResponse.builder()
                     .question(request.getQuestion())
@@ -78,8 +102,10 @@ public class AiChatService {
                     .build();
 
         } catch (Exception ex) {
-            log.error("AI service error for question='{}': {}", request.getQuestion(), ex.getMessage(), ex);
-            throw new AiServiceException("AI service is currently unavailable. Please try again later.", ex);
+            log.error("AI service error for question='{}': {}",
+                    request.getQuestion(), ex.getMessage(), ex);
+            throw new AiServiceException(
+                    "AI service is currently unavailable. Please try again later.", ex);
         }
     }
 }
