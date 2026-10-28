@@ -1,0 +1,23 @@
+﻿[INFO] Scanning for projects...
+[INFO] 
+[INFO] ------------------< com.employee:employee-management >------------------
+[INFO] Building Employee Management System 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.3.2:clean (default-clean) @ employee-management ---
+[INFO] Deleting c:\EmployeeManagement\target
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ employee-management ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ employee-management ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 28 source files with javac [debug parameters release 21] to target\classes
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  11.811 s
+[INFO] Finished at: 2026-10-26T16:22:15+05:30
+[INFO] ------------------------------------------------------------------------

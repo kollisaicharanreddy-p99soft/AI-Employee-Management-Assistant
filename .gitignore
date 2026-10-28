@@ -1,0 +1,10 @@
+@'
+target/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+application-local.properties
+application-secret.properties
+'@ | Add-Content .gitignore
