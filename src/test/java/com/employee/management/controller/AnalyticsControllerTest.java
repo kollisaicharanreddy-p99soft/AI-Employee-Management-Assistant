@@ -1,21 +1,32 @@
 package com.employee.management.controller;
 
 import com.employee.management.dto.DepartmentCountDto;
+import com.employee.management.dto.DepartmentDetailDto;
+import com.employee.management.dto.DepartmentReportDataDto;
+import com.employee.management.dto.ReportRequest;
+import com.employee.management.dto.ReportResponse;
+import com.employee.management.dto.ReportType;
 import com.employee.management.dto.StatusCountDto;
 import com.employee.management.dto.WorkforceSummaryDto;
 import com.employee.management.model.EmployeeStatus;
 import com.employee.management.service.AnalyticsService;
+import com.employee.management.service.WorkforceReportService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -26,8 +37,14 @@ class AnalyticsControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @MockBean
     private AnalyticsService analyticsService;
+
+    @MockBean
+    private WorkforceReportService workforceReportService;
 
     @Test
     @DisplayName("GET /api/v1/analytics/employees/count returns total count")
@@ -97,5 +114,78 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.data.totalDepartments").value(2))
                 .andExpect(jsonPath("$.data.countByStatus.length()").value(1))
                 .andExpect(jsonPath("$.data.countByDepartment.length()").value(1));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/analytics/reports generates report successfully")
+    void generateReport_success() throws Exception {
+        ReportResponse<DepartmentReportDataDto> mockResponse = ReportResponse.<DepartmentReportDataDto>builder()
+                .reportType(ReportType.DEPARTMENT_REPORT)
+                .generatedAt(LocalDateTime.now())
+                .summary("The organization has 1 department.")
+                .data(DepartmentReportDataDto.builder()
+                        .totalDepartments(1)
+                        .totalEmployees(2)
+                        .departments(List.of(
+                                DepartmentDetailDto.builder()
+                                        .id(1L)
+                                        .name("Engineering")
+                                        .description("Software")
+                                        .employeeCount(2)
+                                        .build()
+                        ))
+                        .build())
+                .build();
+
+        when(workforceReportService.generateReport(any(ReportRequest.class)))
+                .thenAnswer(invocation -> mockResponse);
+
+        ReportRequest request = ReportRequest.builder()
+                .reportType(ReportType.DEPARTMENT_REPORT)
+                .departmentName("Engineering")
+                .build();
+
+        mockMvc.perform(post("/api/v1/analytics/reports")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("Report generated successfully"))
+                .andExpect(jsonPath("$.data.reportType").value("DEPARTMENT_REPORT"))
+                .andExpect(jsonPath("$.data.summary").value("The organization has 1 department."))
+                .andExpect(jsonPath("$.data.data.totalDepartments").value(1))
+                .andExpect(jsonPath("$.data.data.departments[0].name").value("Engineering"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/analytics/reports with invalid report type returns 400")
+    void generateReport_invalidReportType() throws Exception {
+        String invalidPayload = """
+                {
+                    "reportType": "INVALID_TYPE"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/analytics/reports")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidPayload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/analytics/reports with missing report type returns 400")
+    void generateReport_missingReportType() throws Exception {
+        String missingPayload = """
+                {
+                    "departmentName": "Finance"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/analytics/reports")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(missingPayload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
     }
 }

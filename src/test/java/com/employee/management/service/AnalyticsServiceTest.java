@@ -1,7 +1,9 @@
 package com.employee.management.service;
 
 import com.employee.management.dto.DepartmentCountDto;
+import com.employee.management.dto.DepartmentDetailDto;
 import com.employee.management.dto.StatusCountDto;
+import com.employee.management.dto.StatusDistributionDto;
 import com.employee.management.dto.WorkforceSummaryDto;
 import com.employee.management.model.Department;
 import com.employee.management.model.Employee;
@@ -164,6 +166,79 @@ class AnalyticsServiceTest {
         assertThat(summary.getTotalDepartments()).isEqualTo(2);
         assertThat(summary.getCountByStatus()).hasSize(EmployeeStatus.values().length);
         assertThat(summary.getCountByDepartment()).hasSize(2);
+    }
+
+    // ── getDepartmentDetails ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("getDepartmentDetails returns all departments with employee counts")
+    void departmentDetails_all() {
+        List<DepartmentDetailDto> details = analyticsService.getDepartmentDetails(null);
+        assertThat(details).hasSize(2);
+        assertThat(details.get(0).getName()).isEqualTo("Engineering");
+        assertThat(details.get(0).getEmployeeCount()).isEqualTo(3);
+        assertThat(details.get(1).getName()).isEqualTo("Finance");
+        assertThat(details.get(1).getEmployeeCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("getDepartmentDetails with name filter returns only matching department")
+    void departmentDetails_filtered() {
+        List<DepartmentDetailDto> details = analyticsService.getDepartmentDetails("engineering");
+        assertThat(details).hasSize(1);
+        assertThat(details.get(0).getName()).isEqualTo("Engineering");
+        assertThat(details.get(0).getEmployeeCount()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("getDepartmentDetails with unknown name returns empty list")
+    void departmentDetails_unknown() {
+        List<DepartmentDetailDto> details = analyticsService.getDepartmentDetails("NonExistent");
+        assertThat(details).isEmpty();
+    }
+
+    // ── getStatusDistribution ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("getStatusDistribution calculates counts and rounded percentages correctly")
+    void statusDistribution_calculations() {
+        List<StatusDistributionDto> distribution = analyticsService.getStatusDistribution();
+        assertThat(distribution).hasSize(EmployeeStatus.values().length);
+
+        Map<EmployeeStatus, StatusDistributionDto> map = distribution.stream()
+                .collect(Collectors.toMap(StatusDistributionDto::getStatus, d -> d));
+
+        // Total employees = 5.
+        // ACTIVE = 3 -> 60.0%
+        // ON_LEAVE = 1 -> 20.0%
+        // TERMINATED = 1 -> 20.0%
+        // INACTIVE = 0 -> 0.0%
+        assertThat(map.get(EmployeeStatus.ACTIVE).getCount()).isEqualTo(3);
+        assertThat(map.get(EmployeeStatus.ACTIVE).getPercentage()).isEqualTo(60.0);
+
+        assertThat(map.get(EmployeeStatus.ON_LEAVE).getCount()).isEqualTo(1);
+        assertThat(map.get(EmployeeStatus.ON_LEAVE).getPercentage()).isEqualTo(20.0);
+
+        assertThat(map.get(EmployeeStatus.TERMINATED).getCount()).isEqualTo(1);
+        assertThat(map.get(EmployeeStatus.TERMINATED).getPercentage()).isEqualTo(20.0);
+
+        assertThat(map.get(EmployeeStatus.INACTIVE).getCount()).isEqualTo(0);
+        assertThat(map.get(EmployeeStatus.INACTIVE).getPercentage()).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("getStatusDistribution handles empty employee dataset without division by zero")
+    void statusDistribution_emptyEmployees() {
+        employeeRepository.deleteAll();
+        entityManager.flush();
+        entityManager.clear();
+
+        List<StatusDistributionDto> distribution = analyticsService.getStatusDistribution();
+        assertThat(distribution).hasSize(EmployeeStatus.values().length);
+        for (StatusDistributionDto dto : distribution) {
+            assertThat(dto.getCount()).isZero();
+            assertThat(dto.getPercentage()).isZero();
+        }
     }
 
     // ── helper ───────────────────────────────────────────────────────────

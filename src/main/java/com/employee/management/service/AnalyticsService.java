@@ -1,7 +1,9 @@
 package com.employee.management.service;
 
 import com.employee.management.dto.DepartmentCountDto;
+import com.employee.management.dto.DepartmentDetailDto;
 import com.employee.management.dto.StatusCountDto;
+import com.employee.management.dto.StatusDistributionDto;
 import com.employee.management.dto.WorkforceSummaryDto;
 import com.employee.management.model.EmployeeStatus;
 import com.employee.management.repository.DepartmentRepository;
@@ -11,6 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -98,5 +102,56 @@ public class AnalyticsService {
                 .countByStatus(getCountByStatus())
                 .countByDepartment(getCountByDepartment())
                 .build();
+    }
+
+    /**
+     * Returns department information with employee counts, optionally filtered by department name.
+     */
+    public List<DepartmentDetailDto> getDepartmentDetails(String departmentNameFilter) {
+        if (departmentNameFilter != null && !departmentNameFilter.trim().isEmpty()) {
+            return departmentRepository.findByNameIgnoreCase(departmentNameFilter.trim())
+                    .map(d -> List.of(DepartmentDetailDto.builder()
+                            .id(d.getId())
+                            .name(d.getName())
+                            .description(d.getDescription())
+                            .employeeCount(employeeRepository.countByDepartmentId(d.getId()))
+                            .build()))
+                    .orElseGet(List::of);
+        }
+
+        return departmentRepository.findAllOrderedByName()
+                .stream()
+                .map(d -> DepartmentDetailDto.builder()
+                        .id(d.getId())
+                        .name(d.getName())
+                        .description(d.getDescription())
+                        .employeeCount(employeeRepository.countByDepartmentId(d.getId()))
+                        .build())
+                .toList();
+    }
+
+    /**
+     * Returns employee status counts and deterministic percentages (rounded to 1 decimal place).
+     * Handles zero total employees cleanly.
+     */
+    public List<StatusDistributionDto> getStatusDistribution() {
+        long totalEmployees = getTotalEmployeeCount();
+        List<StatusCountDto> statusCounts = getCountByStatus();
+
+        return statusCounts.stream()
+                .map(sc -> {
+                    double percentage = 0.0;
+                    if (totalEmployees > 0) {
+                        percentage = BigDecimal.valueOf((sc.getCount() * 100.0) / totalEmployees)
+                                .setScale(1, RoundingMode.HALF_UP)
+                                .doubleValue();
+                    }
+                    return StatusDistributionDto.builder()
+                            .status(sc.getStatus())
+                            .count(sc.getCount())
+                            .percentage(percentage)
+                            .build();
+                })
+                .toList();
     }
 }
