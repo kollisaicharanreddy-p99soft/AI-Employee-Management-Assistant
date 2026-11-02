@@ -37,7 +37,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -46,209 +45,211 @@ import static org.mockito.Mockito.when;
 @DisplayName("HrPolicyService Unit Tests")
 class HrPolicyServiceTest {
 
-    @Mock
-    private VectorStore vectorStore;
+        @Mock
+        private VectorStore vectorStore;
 
-    @Mock
-    private ChatModel chatModel;
+        @Mock
+        private ChatModel chatModel;
 
-    private HrPolicyService hrPolicyService;
+        private HrPolicyService hrPolicyService;
 
-    @BeforeEach
-    void setUp() {
-        hrPolicyService = new HrPolicyService(vectorStore, chatModel);
-    }
-
-    private byte[] createSamplePdf(String content) throws IOException {
-        try (PDDocument doc = new PDDocument()) {
-            PDPage page = new PDPage();
-            doc.addPage(page);
-            try (PDPageContentStream contentStream = new PDPageContentStream(doc, page)) {
-                contentStream.beginText();
-                contentStream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
-                contentStream.newLineAtOffset(50, 700);
-                contentStream.showText(content);
-                contentStream.endText();
-            }
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            doc.save(baos);
-            return baos.toByteArray();
+        @BeforeEach
+        void setUp() {
+                hrPolicyService = new HrPolicyService(vectorStore, chatModel);
         }
-    }
 
-    @Test
-    @DisplayName("Upload valid TXT document successfully stores chunks in VectorStore")
-    void uploadTxtDocument_success() {
-        String content = "Employees are entitled to 20 days of paid vacation per calendar year. Sick leave is 10 days.";
-        MockMultipartFile file = new MockMultipartFile(
-                "file", "vacation_policy.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
+        private byte[] createSamplePdf(String content) throws IOException {
+                try (PDDocument doc = new PDDocument()) {
+                        PDPage page = new PDPage();
+                        doc.addPage(page);
+                        try (PDPageContentStream contentStream = new PDPageContentStream(doc, page)) {
+                                contentStream.beginText();
+                                contentStream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                                contentStream.newLineAtOffset(50, 700);
+                                contentStream.showText(content);
+                                contentStream.endText();
+                        }
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        doc.save(baos);
+                        return baos.toByteArray();
+                }
+        }
 
-        PolicyUploadResponse response = hrPolicyService.uploadPolicy(file);
+        @Test
+        @DisplayName("Upload valid TXT document successfully stores chunks in VectorStore")
+        void uploadTxtDocument_success() {
+                String content = "Employees are entitled to 20 days of paid vacation per calendar year. Sick leave is 10 days.";
+                MockMultipartFile file = new MockMultipartFile(
+                                "file", "vacation_policy.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
 
-        assertThat(response).isNotNull();
-        assertThat(response.getDocumentId()).isNotBlank();
-        assertThat(response.getFileName()).isEqualTo("vacation_policy.txt");
-        assertThat(response.getFileType()).isEqualTo("txt");
-        assertThat(response.getChunkCount()).isGreaterThan(0);
-        assertThat(response.getStatus()).isEqualTo("SUCCESS");
+                PolicyUploadResponse response = hrPolicyService.uploadPolicy(file);
 
-        verify(vectorStore, times(1)).add(anyList());
+                assertThat(response).isNotNull();
+                assertThat(response.getDocumentId()).isNotBlank();
+                assertThat(response.getFileName()).isEqualTo("vacation_policy.txt");
+                assertThat(response.getFileType()).isEqualTo("txt");
+                assertThat(response.getChunkCount()).isGreaterThan(0);
+                assertThat(response.getStatus()).isEqualTo("SUCCESS");
 
-        List<PolicyDocumentDto> policies = hrPolicyService.listPolicies();
-        assertThat(policies).hasSize(1);
-        assertThat(policies.get(0).getDocumentId()).isEqualTo(response.getDocumentId());
-    }
+                verify(vectorStore, times(1)).add(anyList());
 
-    @Test
-    @DisplayName("Upload valid PDF document successfully extracts text and indexes chunks")
-    void uploadPdfDocument_success() throws IOException {
-        byte[] pdfBytes = createSamplePdf("Employees may work remotely up to two days per week with manager approval.");
-        MockMultipartFile file = new MockMultipartFile(
-                "file", "wfh_policy.pdf", "application/pdf", pdfBytes);
+                List<PolicyDocumentDto> policies = hrPolicyService.listPolicies();
+                assertThat(policies).hasSize(1);
+                assertThat(policies.get(0).getDocumentId()).isEqualTo(response.getDocumentId());
+        }
 
-        PolicyUploadResponse response = hrPolicyService.uploadPolicy(file);
+        @Test
+        @DisplayName("Upload valid PDF document successfully extracts text and indexes chunks")
+        void uploadPdfDocument_success() throws IOException {
+                byte[] pdfBytes = createSamplePdf(
+                                "Employees may work remotely up to two days per week with manager approval.");
+                MockMultipartFile file = new MockMultipartFile(
+                                "file", "wfh_policy.pdf", "application/pdf", pdfBytes);
 
-        assertThat(response).isNotNull();
-        assertThat(response.getFileName()).isEqualTo("wfh_policy.pdf");
-        assertThat(response.getFileType()).isEqualTo("pdf");
-        assertThat(response.getChunkCount()).isGreaterThan(0);
+                PolicyUploadResponse response = hrPolicyService.uploadPolicy(file);
 
-        verify(vectorStore, times(1)).add(anyList());
-    }
+                assertThat(response).isNotNull();
+                assertThat(response.getFileName()).isEqualTo("wfh_policy.pdf");
+                assertThat(response.getFileType()).isEqualTo("pdf");
+                assertThat(response.getChunkCount()).isGreaterThan(0);
 
-    @Test
-    @DisplayName("Upload rejects empty file")
-    void uploadEmptyFile_throwsException() {
-        MockMultipartFile file = new MockMultipartFile(
-                "file", "empty.txt", "text/plain", new byte[0]);
+                verify(vectorStore, times(1)).add(anyList());
+        }
 
-        assertThatThrownBy(() -> hrPolicyService.uploadPolicy(file))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("empty");
-    }
+        @Test
+        @DisplayName("Upload rejects empty file")
+        void uploadEmptyFile_throwsException() {
+                MockMultipartFile file = new MockMultipartFile(
+                                "file", "empty.txt", "text/plain", new byte[0]);
 
-    @Test
-    @DisplayName("Upload rejects unsupported file types")
-    void uploadUnsupportedFile_throwsException() {
-        MockMultipartFile file = new MockMultipartFile(
-                "file", "policy.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "sample content".getBytes(StandardCharsets.UTF_8));
+                assertThatThrownBy(() -> hrPolicyService.uploadPolicy(file))
+                                .isInstanceOf(IllegalArgumentException.class)
+                                .hasMessageContaining("empty");
+        }
 
-        assertThatThrownBy(() -> hrPolicyService.uploadPolicy(file))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Unsupported file type");
-    }
+        @Test
+        @DisplayName("Upload rejects unsupported file types")
+        void uploadUnsupportedFile_throwsException() {
+                MockMultipartFile file = new MockMultipartFile(
+                                "file", "policy.docx",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                "sample content".getBytes(StandardCharsets.UTF_8));
 
-    @Test
-    @DisplayName("Upload duplicate document with identical content throws DuplicateResourceException")
-    void uploadDuplicateDocument_throwsException() {
-        String content = "Annual performance reviews occur every December.";
-        MockMultipartFile file1 = new MockMultipartFile(
-                "file", "reviews_v1.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
-        MockMultipartFile file2 = new MockMultipartFile(
-                "file", "reviews_v2.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
+                assertThatThrownBy(() -> hrPolicyService.uploadPolicy(file))
+                                .isInstanceOf(IllegalArgumentException.class)
+                                .hasMessageContaining("Unsupported file type");
+        }
 
-        hrPolicyService.uploadPolicy(file1);
+        @Test
+        @DisplayName("Upload duplicate document with identical content throws DuplicateResourceException")
+        void uploadDuplicateDocument_throwsException() {
+                String content = "Annual performance reviews occur every December.";
+                MockMultipartFile file1 = new MockMultipartFile(
+                                "file", "reviews_v1.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
+                MockMultipartFile file2 = new MockMultipartFile(
+                                "file", "reviews_v2.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
 
-        assertThatThrownBy(() -> hrPolicyService.uploadPolicy(file2))
-                .isInstanceOf(DuplicateResourceException.class)
-                .hasMessageContaining("matches 'reviews_v1.txt'");
-    }
+                hrPolicyService.uploadPolicy(file1);
 
-    @Test
-    @DisplayName("Ask question with no documents indexed returns fallback immediately")
-    void askQuestion_noDocuments_returnsFallback() {
-        PolicyQuestionRequest req = PolicyQuestionRequest.builder()
-                .question("What is the sick leave policy?")
-                .build();
+                assertThatThrownBy(() -> hrPolicyService.uploadPolicy(file2))
+                                .isInstanceOf(DuplicateResourceException.class)
+                                .hasMessageContaining("matches 'reviews_v1.txt'");
+        }
 
-        PolicyAnswerResponse response = hrPolicyService.askQuestion(req);
+        @Test
+        @DisplayName("Ask question with no documents indexed returns fallback immediately")
+        void askQuestion_noDocuments_returnsFallback() {
+                PolicyQuestionRequest req = PolicyQuestionRequest.builder()
+                                .question("What is the sick leave policy?")
+                                .build();
 
-        assertThat(response.getAnswer()).isEqualTo(HrPolicyService.FALLBACK_NO_INFO);
-        assertThat(response.isInformationFound()).isFalse();
-        assertThat(response.getSources()).isEmpty();
-    }
+                PolicyAnswerResponse response = hrPolicyService.askQuestion(req);
 
-    @Test
-    @DisplayName("Ask question with no matching vector results returns fallback without LLM call")
-    void askQuestion_noMatchingChunks_returnsFallback() {
-        // Ingest a document
-        String content = "Health insurance covers dental and vision.";
-        MockMultipartFile file = new MockMultipartFile(
-                "file", "insurance.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
-        hrPolicyService.uploadPolicy(file);
+                assertThat(response.getAnswer()).isEqualTo(HrPolicyService.FALLBACK_NO_INFO);
+                assertThat(response.isInformationFound()).isFalse();
+                assertThat(response.getSources()).isEmpty();
+        }
 
-        // Vector store returns no matches above similarity threshold
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(Collections.emptyList());
+        @Test
+        @DisplayName("Ask question with no matching vector results returns fallback without LLM call")
+        void askQuestion_noMatchingChunks_returnsFallback() {
+                // Ingest a document
+                String content = "Health insurance covers dental and vision.";
+                MockMultipartFile file = new MockMultipartFile(
+                                "file", "insurance.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
+                hrPolicyService.uploadPolicy(file);
 
-        PolicyQuestionRequest req = PolicyQuestionRequest.builder()
-                .question("What is the parental leave duration?")
-                .build();
+                // Vector store returns no matches above similarity threshold
+                when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(Collections.emptyList());
 
-        PolicyAnswerResponse response = hrPolicyService.askQuestion(req);
+                PolicyQuestionRequest req = PolicyQuestionRequest.builder()
+                                .question("What is the parental leave duration?")
+                                .build();
 
-        assertThat(response.getAnswer()).isEqualTo(HrPolicyService.FALLBACK_NO_INFO);
-        assertThat(response.isInformationFound()).isFalse();
-        assertThat(response.getSources()).isEmpty();
-    }
+                PolicyAnswerResponse response = hrPolicyService.askQuestion(req);
 
-    @Test
-    @DisplayName("Ask question with relevant chunks returns grounded answer with source citations")
-    void askQuestion_withMatchingChunks_callsLlmAndReturnsCitations() {
-        // Ingest a document
-        String content = "Employees receive 10 days of paid sick leave per year.";
-        MockMultipartFile file = new MockMultipartFile(
-                "file", "sick_leave.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
-        hrPolicyService.uploadPolicy(file);
+                assertThat(response.getAnswer()).isEqualTo(HrPolicyService.FALLBACK_NO_INFO);
+                assertThat(response.isInformationFound()).isFalse();
+                assertThat(response.getSources()).isEmpty();
+        }
 
-        Document matchedDoc = Document.builder()
-                .text("Employees receive 10 days of paid sick leave per year.")
-                .metadata(Map.of("fileName", "sick_leave.txt", "pageNumber", 1))
-                .score(0.88)
-                .build();
+        @Test
+        @DisplayName("Ask question with relevant chunks returns grounded answer with source citations")
+        void askQuestion_withMatchingChunks_callsLlmAndReturnsCitations() {
+                // Ingest a document
+                String content = "Employees receive 10 days of paid sick leave per year.";
+                MockMultipartFile file = new MockMultipartFile(
+                                "file", "sick_leave.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
+                hrPolicyService.uploadPolicy(file);
 
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(matchedDoc));
+                Document matchedDoc = Document.builder()
+                                .text("Employees receive 10 days of paid sick leave per year.")
+                                .metadata(Map.of("fileName", "sick_leave.txt", "pageNumber", 1))
+                                .score(0.88)
+                                .build();
 
-        org.springframework.ai.chat.messages.AssistantMessage assistantMessage =
-                new org.springframework.ai.chat.messages.AssistantMessage("Employees are entitled to 10 days of paid sick leave per year.");
-        Generation gen = new Generation(assistantMessage);
-        ChatResponse chatResponse = new ChatResponse(List.of(gen));
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+                when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(matchedDoc));
 
-        PolicyQuestionRequest req = PolicyQuestionRequest.builder()
-                .question("How many sick days do employees get?")
-                .build();
+                org.springframework.ai.chat.messages.AssistantMessage assistantMessage = new org.springframework.ai.chat.messages.AssistantMessage(
+                                "Employees are entitled to 10 days of paid sick leave per year.");
+                Generation gen = new Generation(assistantMessage);
+                ChatResponse chatResponse = new ChatResponse(List.of(gen));
+                when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
 
-        PolicyAnswerResponse response = hrPolicyService.askQuestion(req);
+                PolicyQuestionRequest req = PolicyQuestionRequest.builder()
+                                .question("How many sick days do employees get?")
+                                .build();
 
-        assertThat(response.isInformationFound()).isTrue();
-        assertThat(response.getAnswer()).contains("10 days");
-        assertThat(response.getSources()).hasSize(1);
-        assertThat(response.getSources().get(0).getDocumentName()).isEqualTo("sick_leave.txt");
-        assertThat(response.getSources().get(0).getPageNumber()).isEqualTo(1);
-    }
+                PolicyAnswerResponse response = hrPolicyService.askQuestion(req);
 
-    @Test
-    @DisplayName("Delete document removes vector entries and metadata from registry")
-    void deleteDocument_success() {
-        String content = "Overtime must be pre-approved by the department manager.";
-        MockMultipartFile file = new MockMultipartFile(
-                "file", "overtime.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
+                assertThat(response.isInformationFound()).isTrue();
+                assertThat(response.getAnswer()).contains("10 days");
+                assertThat(response.getSources()).hasSize(1);
+                assertThat(response.getSources().get(0).getDocumentName()).isEqualTo("sick_leave.txt");
+                assertThat(response.getSources().get(0).getPageNumber()).isEqualTo(1);
+        }
 
-        PolicyUploadResponse uploadRes = hrPolicyService.uploadPolicy(file);
-        assertThat(hrPolicyService.listPolicies()).hasSize(1);
+        @Test
+        @DisplayName("Delete document removes vector entries and metadata from registry")
+        void deleteDocument_success() {
+                String content = "Overtime must be pre-approved by the department manager.";
+                MockMultipartFile file = new MockMultipartFile(
+                                "file", "overtime.txt", "text/plain", content.getBytes(StandardCharsets.UTF_8));
 
-        hrPolicyService.deletePolicy(uploadRes.getDocumentId());
+                PolicyUploadResponse uploadRes = hrPolicyService.uploadPolicy(file);
+                assertThat(hrPolicyService.listPolicies()).hasSize(1);
 
-        assertThat(hrPolicyService.listPolicies()).isEmpty();
-        verify(vectorStore, times(1)).delete(anyList());
-    }
+                hrPolicyService.deletePolicy(uploadRes.getDocumentId());
 
-    @Test
-    @DisplayName("Delete non-existent document throws ResourceNotFoundException")
-    void deleteDocument_notFound_throwsException() {
-        assertThatThrownBy(() -> hrPolicyService.deletePolicy("non-existent-id"))
-                .isInstanceOf(ResourceNotFoundException.class)
-                .hasMessageContaining("not found");
-    }
+                assertThat(hrPolicyService.listPolicies()).isEmpty();
+                verify(vectorStore, times(1)).delete(anyList());
+        }
+
+        @Test
+        @DisplayName("Delete non-existent document throws ResourceNotFoundException")
+        void deleteDocument_notFound_throwsException() {
+                assertThatThrownBy(() -> hrPolicyService.deletePolicy("non-existent-id"))
+                                .isInstanceOf(ResourceNotFoundException.class)
+                                .hasMessageContaining("not found");
+        }
 }
