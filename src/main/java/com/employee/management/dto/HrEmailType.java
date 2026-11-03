@@ -1,0 +1,12 @@
+package com.employee.management.dto;
+
+public enum HrEmailType {
+    WELCOME,
+    INTERVIEW_INVITATION,
+    INTERVIEW_CONFIRMATION,
+    LEAVE_APPROVAL,
+    LEAVE_REJECTION,
+    EMPLOYEE_ANNOUNCEMENT,
+    GENERAL_COMMUNICATION
+}
+
